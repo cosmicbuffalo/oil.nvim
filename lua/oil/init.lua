@@ -1331,25 +1331,6 @@ M.setup = function(opts)
     })
   end
 
-  -- if config.virtual_text_colums then
-  --   -- HACK: When opening an oil buffer, ensure the cursor starts at the beginning of the line
-  --   -- This is necessary to avoid a visual glitch when using virtual columns in front of the
-  --   -- name column where the inline virtual text would push the buffer text but not the cursor
-  --   vim.api.nvim_create_autocmd("User", {
-  --     pattern = "OilBufReady",
-  --     callback = function(args)
-  --       vim.defer_fn(function()
-  --         -- This will trigger the constrain_cursor autocommand in view.lua, which will ensure
-  --         -- the cursor lands on a valid column
-  --         if config.show_header then
-  --           vim.cmd("normal! j")
-  --         end
-  --         vim.cmd("normal! 0")
-  --       end, 2000)
-  --     end,
-  --   })
-  -- end
-
   vim.api.nvim_create_autocmd({ "BufWinEnter", "WinNew", "WinEnter" }, {
     desc = "Reset bufhidden when entering a preview buffer",
     group = aug,

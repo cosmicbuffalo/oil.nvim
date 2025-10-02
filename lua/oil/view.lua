@@ -899,7 +899,6 @@ local function render_buffer(bufnr, opts)
   vim.b[bufnr].oil_rendered_lines = true
   -- Reset dynamic trailing column position when re-rendering
   vim.b[bufnr].oil_trailing_column_start = nil
-  -- vim.api.nvim_exec_autocmds("User", { pattern = "OilBufReady", modeline = false, data = { buf = bufnr } })
   vim.bo[bufnr].modifiable = false
   vim.bo[bufnr].modified = false
   util.set_highlights(bufnr, highlights)
