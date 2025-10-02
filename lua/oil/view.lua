@@ -905,7 +905,8 @@ local function render_buffer(bufnr, opts)
 
   if opts.jump then
     -- TODO why is the schedule necessary?
-    vim.defer_fn(function()
+    -- using defer_fn causes issues with the jump not happening
+    vim.schedule(function()
       for _, winid in ipairs(vim.api.nvim_list_wins()) do
         if vim.api.nvim_win_is_valid(winid) and vim.api.nvim_win_get_buf(winid) == bufnr then
           if jump_idx then
@@ -924,10 +925,12 @@ local function render_buffer(bufnr, opts)
             end
           end
 
-          constrain_cursor(bufnr, "name")
+          vim.defer_fn(function()
+            constrain_cursor(bufnr, "name")
+          end, 50)
         end
       end
-    end, 50)
+    end)
   end
   return seek_after_render_found
 end
