@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nvim:*)",
+      "Bash(lua:*)",
+      "WebFetch(domain:neovim.io)",
+      "Read(/tmp/**)",
+      "Read(/tmp/**)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "Bash(make test:*)",
+      "Bash(./run_tests.sh:*)",
+      "Bash(awk:*)",
+      "Read(///**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
