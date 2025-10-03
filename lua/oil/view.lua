@@ -892,6 +892,11 @@ local function render_buffer(bufnr, opts)
     vim.b[bufnr].oil_buffer_column_widths = buffer_column_widths
   end
 
+  -- If we have a header but no entries, add an empty line so the cursor has somewhere to go
+  if config.show_header and #line_table == 1 then
+    table.insert(line_table, {})
+  end
+
   local lines, highlights = util.render_table(line_table, buffer_column_widths)
 
   vim.bo[bufnr].modifiable = true
@@ -1238,6 +1243,111 @@ M.render_buffer_async = function(bufnr, opts, callback)
   end)
 end
 
+---Render virtual columns for a single line
+---@param ns integer Namespace ID
+---@param bufnr integer Buffer number
+---@param lnum integer Line number (0-indexed)
+---@param column_config table Column configuration
+---@param all_columns table All columns
+---@param virtual_column_widths table Virtual column widths
+---@param buffer_column_widths table Buffer column widths
+---@param trailing_column_start integer Trailing column start position
+---@return boolean success Whether the line was successfully rendered
+local function render_virtual_columns_for_line(ns, bufnr, lnum, column_config, all_columns, virtual_column_widths, buffer_column_widths, trailing_column_start)
+  local line = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, true)[1]
+  if not line then
+    return false
+  end
+
+  local id_str = line:match("^/(%d+)")
+  local id = tonumber(id_str)
+  if not id then
+    return false
+  end
+
+  local entry = cache.get_entry_by_id(id)
+  if not entry then
+    return false
+  end
+
+  local adapter = util.get_adapter(bufnr, true)
+
+  local inline_virt_text = {}
+  local trailing_virt_text = {}
+
+  local editable_column_index = 2
+  local inline_pos = buffer_column_widths[1] -- start after ID column
+
+  local found_name_column = false
+  for col_idx, col_info in ipairs(column_config) do
+    if col_info.is_virtual then
+      local col_def = all_columns[col_idx]
+      local chunk = columns.render_col(adapter, col_def, entry, bufnr)
+      local text = type(chunk) == "table" and chunk[1] or chunk or ""
+      -- strip text so that we can pad it correctly
+      text = string.gsub(text, "^%s*(.-)%s*$", "%1")
+      local hl = type(chunk) == "table" and chunk[2] or "OilVirtText"
+
+      local col_width = virtual_column_widths[col_idx]
+      local padding_size = math.max(0, col_width - vim.api.nvim_strwidth(text))
+      local padded_text = text .. string.rep(" ", padding_size)
+
+      if not found_name_column then
+        -- This virtual column comes before the name column - use inline positioning
+        table.insert(inline_virt_text, { " ", "OilVirtText" }) -- space between multiple inline columns)
+        table.insert(inline_virt_text, { padded_text, hl })
+      else
+        -- This virtual column comes after the name column - use trailing positioning
+        table.insert(trailing_virt_text, { " ", "OilVirtText" }) -- space between multiple inline columns)
+        table.insert(trailing_virt_text, { padded_text, hl })
+      end
+    else
+      if #inline_virt_text > 0 then
+        -- If we have any accumulated inline virtual text, apply it now before
+        -- moving on to the next section after this editable column
+        table.insert(inline_virt_text, { " ", "OilVirtText" }) -- space before editable column
+        vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, inline_pos - 1, {
+          virt_text = inline_virt_text,
+          virt_text_pos = "inline",
+        })
+        inline_virt_text = {}
+      end
+      if col_info.name == "name" then
+        -- If this is the name column, we are done with inline text, all remaining columns will be trailing
+        found_name_column = true
+      else
+        inline_pos = inline_pos + buffer_column_widths[editable_column_index] + 1
+        editable_column_index = editable_column_index + 1
+      end
+    end
+  end
+  if #inline_virt_text > 0 then
+    -- If we have any accumulated inline virtual text at this point
+    -- that means the name column was not configured, so we want to apply it now
+    -- there also shouldn't be any trailing virtual text in this case
+    table.insert(inline_virt_text, { " ", "OilVirtText" })
+    vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, inline_pos - 1, {
+      virt_text = inline_virt_text,
+      virt_text_pos = "inline",
+    })
+  end
+
+  if #trailing_virt_text > 0 then
+    local dynamic_trailing_start = vim.b[bufnr].oil_trailing_column_start
+    local actual_trailing_start = dynamic_trailing_start and math.max(dynamic_trailing_start, trailing_column_start) or trailing_column_start
+    vim.b[bufnr].oil_trailing_column_start = actual_trailing_start
+
+    vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, actual_trailing_start, {
+      virt_text = trailing_virt_text,
+      virt_text_pos = "overlay",
+      strict = false,
+      virt_text_win_col = actual_trailing_start,
+    })
+  end
+
+  return true
+end
+
 ---@param ns integer Namespace ID
 ---@param winid integer Window ID
 ---@param bufnr integer Buffer number
@@ -1300,96 +1410,16 @@ M.render_virtual_columns_on_win = function(ns, winid, bufnr, toprow, botrow)
   end
 
   for lnum = toprow + header_offset, botrow do
-    local line = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, true)[1]
-    if not line then
-      return
-    end
-
-    local id_str = line:match("^/(%d+)")
-    local id = tonumber(id_str)
-    if not id then
-      return
-    end
-
-    local entry = cache.get_entry_by_id(id)
-    if not entry then
-      return
-    end
-
-    local adapter = util.get_adapter(bufnr, true)
-
-    local inline_virt_text = {}
-    local trailing_virt_text = {}
-
-    local editable_column_index = 2
-    local inline_pos = buffer_column_widths[1] -- start after ID column
-
-    local found_name_column = false
-    for col_idx, col_info in ipairs(column_config) do
-      if col_info.is_virtual then
-        local col_def = all_columns[col_idx]
-        local chunk = columns.render_col(adapter, col_def, entry, bufnr)
-        local text = type(chunk) == "table" and chunk[1] or chunk or ""
-        -- strip text so that we can pad it correctly
-        text = string.gsub(text, "^%s*(.-)%s*$", "%1")
-        local hl = type(chunk) == "table" and chunk[2] or "OilVirtText"
-
-        local col_width = virtual_column_widths[col_idx]
-        local padding_size = math.max(0, col_width - vim.api.nvim_strwidth(text))
-        local padded_text = text .. string.rep(" ", padding_size)
-
-        if not found_name_column then
-          -- This virtual column comes before the name column - use inline positioning
-          table.insert(inline_virt_text, { " ", "OilVirtText" }) -- space between multiple inline columns)
-          table.insert(inline_virt_text, { padded_text, hl })
-        else
-          -- This virtual column comes after the name column - use trailing positioning
-          table.insert(trailing_virt_text, { " ", "OilVirtText" }) -- space between multiple inline columns)
-          table.insert(trailing_virt_text, { padded_text, hl })
-        end
-      else
-        if #inline_virt_text > 0 then
-          -- If we have any accumulated inline virtual text, apply it now before
-          -- moving on to the next section after this editable column
-          table.insert(inline_virt_text, { " ", "OilVirtText" }) -- space before editable column
-          vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, inline_pos - 1, {
-            virt_text = inline_virt_text,
-            virt_text_pos = "inline",
-          })
-          inline_virt_text = {}
-        end
-        if col_info.name == "name" then
-          -- If this is the name column, we are done with inline text, all remaining columns will be trailing
-          found_name_column = true
-        else
-          inline_pos = inline_pos + buffer_column_widths[editable_column_index] + 1
-          editable_column_index = editable_column_index + 1
-        end
-      end
-    end
-    if #inline_virt_text > 0 then
-      -- If we have any accumulated inline virtual text at this point
-      -- that means the name column was not configured, so we want to apply it now
-      -- there also shouldn't be any trailing virtual text in this case
-      table.insert(inline_virt_text, { " ", "OilVirtText" })
-      vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, inline_pos - 1, {
-        virt_text = inline_virt_text,
-        virt_text_pos = "inline",
-      })
-    end
-
-    if #trailing_virt_text > 0 then
-      local dynamic_trailing_start = vim.b[bufnr].oil_trailing_column_start
-      local actual_trailing_start = dynamic_trailing_start and math.max(dynamic_trailing_start, trailing_column_start) or trailing_column_start
-      vim.b[bufnr].oil_trailing_column_start = actual_trailing_start
-      
-      vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, actual_trailing_start, {
-        virt_text = trailing_virt_text,
-        virt_text_pos = "overlay",
-        strict = false,
-        virt_text_win_col = actual_trailing_start,
-      })
-    end
+    render_virtual_columns_for_line(
+      ns,
+      bufnr,
+      lnum,
+      column_config,
+      all_columns,
+      virtual_column_widths,
+      buffer_column_widths,
+      trailing_column_start
+    )
   end
 end
 
