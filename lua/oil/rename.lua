@@ -65,7 +65,7 @@ M.transform = function(callback, opts)
   end
 
   local type_filter = build_type_filter(opts.types)
-  local column_defs = columns.get_supported_columns(adapter)
+  local column_defs = columns.get_editable_columns(adapter)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, true)
   local edits = {}
   local seen_names = {}

@@ -142,11 +142,229 @@ end
 ---@field fs_event? any uv_fs_event_t
 ---@field col_width? integer[]
 ---@field col_align? oil.ColumnAlign[]
+---@field column_layout? oil.ColumnLayout[]
+---@field name_width? integer
+---@field suffix_width? table<integer, integer>
 
 -- List of bufnrs
 ---@type table<integer, oil.ViewData>
 local session = {}
 local _rendering = {}
+
+local decor_ns = vim.api.nvim_create_namespace('OilVirtualColumnsDecor')
+local column_ns = vim.api.nvim_create_namespace('OilVirtualColumns')
+local header_ns = vim.api.nvim_create_namespace('OilColumnHeader')
+---@type table<integer, { adapter: oil.Adapter }>
+local decor_ctx = {}
+
+---@param chunk oil.TextChunk
+---@param width integer
+---@param align oil.ColumnAlign
+---@param fallback_hl? string
+---@return [string, string?][]
+local function pad_virtual_chunk(chunk, width, align, fallback_hl)
+  local text = type(chunk) == 'table' and chunk[1] or chunk
+  ---@cast text string
+  local hl = type(chunk) == 'table' and chunk[2] or fallback_hl
+  local padded, leading_pad = util.pad_align(text, width, align)
+  if type(hl) ~= 'table' then
+    return { { padded, hl } }
+  end
+
+  local ret = {}
+  if leading_pad > 0 then
+    table.insert(ret, { string.rep(' ', leading_pad) })
+  end
+  for _, range in ipairs(hl) do
+    table.insert(ret, { text:sub(range[2] + 1, range[3]), range[1] })
+  end
+  local trailing = padded:sub(leading_pad + #text + 1)
+  if trailing ~= '' then
+    table.insert(ret, { trailing })
+  end
+  return ret
+end
+
+---@param entry oil.InternalEntry
+---@param adapter oil.Adapter
+---@param bufnr integer
+---@param sess oil.ViewData
+---@param line string
+---@param row integer
+---@param ns integer
+---@param ephemeral boolean
+local function render_prefix_virtual_columns(entry, adapter, bufnr, sess, line, row, ns, ephemeral)
+  local layout = sess.column_layout
+  local col_width = sess.col_width
+  local col_align = sess.col_align
+  if not layout or not col_width or not col_align then
+    return
+  end
+  local id_prefix = line:match('^/%d+ ')
+  if not id_prefix then
+    return
+  end
+
+  local byte_col = #id_prefix
+  local prefix_index = 0
+  for _, item in ipairs(layout) do
+    if item.name == 'name' then
+      break
+    end
+    prefix_index = prefix_index + 1
+    local width = col_width[prefix_index + 1] or 0
+    local align = col_align[prefix_index + 1] or 'left'
+    if item.virtual and width > 0 then
+      local chunk = columns.render_col(adapter, item.def, entry, bufnr)
+      local opts = {
+        virt_text = pad_virtual_chunk(chunk, width, align, 'OilVirtualText'),
+        virt_text_pos = 'overlay',
+      }
+      if ephemeral then
+        opts.ephemeral = true
+      else
+        opts.end_col = math.min(#line, byte_col + width)
+        opts.invalidate = true
+      end
+      vim.api.nvim_buf_set_extmark(bufnr, ns, row, byte_col, opts)
+    end
+
+    if item.virtual then
+      byte_col = byte_col + width + 1
+    else
+      local chunk = columns.render_col(adapter, item.def, entry, bufnr)
+      local text = type(chunk) == 'table' and chunk[1] or chunk
+      ---@cast text string
+      local padded = util.pad_align(text, width, align)
+      byte_col = byte_col + #padded + 1
+    end
+  end
+end
+
+---@param entry oil.InternalEntry
+---@param adapter oil.Adapter
+---@param bufnr integer
+---@param sess oil.ViewData
+---@return [string, string?][]
+local function render_suffix_virtual_columns(entry, adapter, bufnr, sess)
+  local ret = {}
+  local after_name = false
+  for i, item in ipairs(sess.column_layout or {}) do
+    if item.name == 'name' then
+      after_name = true
+    elseif after_name and item.virtual then
+      local width = (sess.suffix_width or {})[i] or 1
+      local _, conf = util.split_config(item.def)
+      local align = (conf and conf.align) or 'left'
+      local chunk = columns.render_col(adapter, item.def, entry, bufnr)
+      for _, virt_chunk in ipairs(pad_virtual_chunk(chunk, width, align, 'OilVirtualText')) do
+        table.insert(ret, virt_chunk)
+      end
+      table.insert(ret, { ' ', 'OilVirtualText' })
+    end
+  end
+  return ret
+end
+
+---@param winid integer
+---@param line string
+---@param sess oil.ViewData
+---@return integer
+local function get_suffix_win_col(winid, line, sess)
+  local col = 0
+  local cole = vim.wo[winid].conceallevel
+  if cole == 1 then
+    col = 1
+  elseif cole == 0 then
+    local id_prefix = line:match('^/%d+ ')
+    col = id_prefix and vim.api.nvim_strwidth(id_prefix) or 0
+  end
+  for i = 2, #(sess.col_width or {}) do
+    col = col + (sess.col_width[i] or 0) + 1
+  end
+  return col + (sess.name_width or 1) + 1
+end
+
+---@param text string
+---@param width integer
+---@return string
+local function truncate_header(text, width)
+  if vim.api.nvim_strwidth(text) <= width then
+    return text
+  elseif width <= 1 then
+    return '…'
+  end
+  local ret = vim.fn.strcharpart(text, 0, width - 1)
+  while vim.api.nvim_strwidth(ret) > width - 1 do
+    ret = vim.fn.strcharpart(ret, 0, vim.fn.strchars(ret) - 1)
+  end
+  return ret .. '…'
+end
+
+---@param sess oil.ViewData
+---@return [string, string][]
+local function build_header_chunks(sess)
+  local ret = {}
+  local before_name = true
+  local prefix_index = 0
+  for i, item in ipairs(sess.column_layout or {}) do
+    local width
+    local align = 'left'
+    if item.name == 'name' then
+      before_name = false
+      width = sess.name_width or 1
+    elseif before_name then
+      prefix_index = prefix_index + 1
+      width = (sess.col_width or {})[prefix_index + 1] or 1
+      local _, conf = util.split_config(item.def)
+      align = (conf and conf.align) or 'left'
+    else
+      width = (sess.suffix_width or {})[i] or 1
+      local _, conf = util.split_config(item.def)
+      align = (conf and conf.align) or 'left'
+    end
+
+    local text = item.name:upper()
+    if config.header_format then
+      text = config.header_format(text)
+      if type(text) ~= 'string' then
+        error('header_format must return a string')
+      end
+    end
+    text = truncate_header(text, width)
+    text = util.pad_align(text, width, align)
+    table.insert(ret, { text .. ' ', 'OilHeader' })
+  end
+  return ret
+end
+
+---@param column_defs oil.ColumnSpec[]
+---@param col_width integer[]
+---@param col_align oil.ColumnAlign[]
+---@return [string, string][]
+local function build_physical_header_chunks(column_defs, col_width, col_align)
+  local ret = {}
+  for i, def in ipairs(column_defs) do
+    local name = util.split_config(def)
+    local text = name:upper()
+    if config.header_format then
+      text = config.header_format(text)
+      if type(text) ~= 'string' then
+        error('header_format must return a string')
+      end
+    end
+    local width = col_width[i + 1] or 1
+    text = truncate_header(text, width)
+    text = util.pad_align(text, width, col_align[i + 1] or 'left')
+    table.insert(ret, { text .. ' ', 'OilHeader' })
+  end
+  local name = config.header_format and config.header_format('NAME') or 'NAME'
+  if type(name) ~= 'string' then
+    error('header_format must return a string')
+  end
+  table.insert(ret, { name, 'OilHeader' })
+  return ret
+end
 
 ---@type table<integer, { lnum: integer, min_col: integer }>
 local insert_boundary = {}
@@ -279,10 +497,28 @@ M.delete_hidden_buffers = function()
   cache.clear_everything()
 end
 
+---@param bufnr integer
+---@param line string
 ---@param adapter oil.Adapter
 ---@param ranges table<string, integer[]>
 ---@return integer
-local function get_first_mutable_column_col(adapter, ranges)
+local function get_first_mutable_column_col(bufnr, line, adapter, ranges)
+  local sess = session[bufnr]
+  if config.virtual_text_columns and sess and sess.column_layout and sess.col_width then
+    local id_prefix = line:match('^/%d+ ')
+    local byte_col = id_prefix and #id_prefix or 0
+    local prefix_index = 0
+    for _, item in ipairs(sess.column_layout) do
+      if item.name == 'name' then
+        return ranges.name[1]
+      end
+      prefix_index = prefix_index + 1
+      if not item.virtual then
+        return byte_col
+      end
+      byte_col = byte_col + (sess.col_width[prefix_index + 1] or 0) + 1
+    end
+  end
   local min_col = ranges.name[1]
   for col_name, start_len in pairs(ranges) do
     local start = start_len[1]
@@ -307,12 +543,12 @@ local function calc_constrained_cursor_pos(bufnr, adapter, mode, cur)
     return
   end
   local line = vim.api.nvim_buf_get_lines(bufnr, cur[1] - 1, cur[1], true)[1]
-  local column_defs = columns.get_supported_columns(adapter)
+  local column_defs = columns.get_editable_columns(adapter)
   local result = parser.parse_line(adapter, line, column_defs)
   if result and result.ranges then
     local min_col
     if mode == 'editable' then
-      min_col = get_first_mutable_column_col(adapter, result.ranges)
+      min_col = get_first_mutable_column_col(bufnr, line, adapter, result.ranges)
     elseif mode == 'name' then
       min_col = result.ranges.name[1]
     else
@@ -400,7 +636,7 @@ local function show_insert_guide(bufnr)
   end
 
   local parser = require('oil.mutator.parser')
-  local column_defs = columns.get_supported_columns(adapter)
+  local column_defs = columns.get_editable_columns(adapter)
   local result = parser.parse_line(adapter, ref_line, column_defs)
   if not result or not result.ranges then
     return
@@ -456,7 +692,7 @@ local function update_insert_boundary(bufnr)
 
   local parser = require('oil.mutator.parser')
   local line = vim.api.nvim_buf_get_lines(bufnr, cur[1] - 1, cur[1], true)[1]
-  local column_defs = columns.get_supported_columns(adapter)
+  local column_defs = columns.get_editable_columns(adapter)
   local result = parser.parse_line(adapter, line, column_defs)
   local min_col = 0
   if result and result.ranges then
@@ -528,7 +764,7 @@ local function redraw_trash_virtual_text(bufnr)
   local os_path = fs.posix_to_os_path(assert(buf_path))
   local ns = vim.api.nvim_create_namespace('OilVtext')
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
-  local column_defs = columns.get_supported_columns(adapter)
+  local column_defs = columns.get_editable_columns(adapter)
   for lnum, line in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, true)) do
     local result = parser.parse_line(adapter, line, column_defs)
     local entry = result and result.entry
@@ -566,7 +802,7 @@ M.reapply_highlights = function(bufnr)
   if not scheme then
     return
   end
-  local column_defs = columns.get_supported_columns(scheme)
+  local column_defs = columns.get_editable_columns(scheme)
   local col_width = vim.deepcopy(sess.col_width)
   ---@cast col_width integer[]
   local col_align = sess.col_align
@@ -822,6 +1058,9 @@ M.initialize = function(bufnr)
     buffer = bufnr,
     callback = function()
       if not _rendering[bufnr] then
+        if config.virtual_text_columns then
+          vim.api.nvim_buf_clear_namespace(bufnr, column_ns, 0, -1)
+        end
         M.reapply_highlights(bufnr)
       end
     end,
@@ -933,27 +1172,80 @@ local function render_buffer(bufnr, opts)
   end
   local seek_after_render_found = false
   local seek_after_render = M.get_last_cursor(bufname)
-  local column_defs = columns.get_supported_columns(scheme)
+  local column_defs = columns.get_editable_columns(scheme)
+  local column_layout = config.virtual_text_columns and columns.get_column_layout(adapter) or nil
   local line_table = {}
+  local rendered_entries = {}
   local col_width = {}
   local col_align = {}
-  for i, col_def in ipairs(column_defs) do
-    col_width[i + 1] = 1
-    local _, conf = util.split_config(col_def)
-    col_align[i + 1] = conf and conf.align or 'left'
+  local suffix_width = {}
+  local name_width = config.show_header and 4 or 1
+  if column_layout then
+    local before_name = true
+    local prefix_index = 0
+    for i, item in ipairs(column_layout) do
+      if item.name == 'name' then
+        before_name = false
+      elseif before_name then
+        prefix_index = prefix_index + 1
+        col_width[prefix_index + 1] = 1
+        local _, conf = util.split_config(item.def)
+        col_align[prefix_index + 1] = (conf and conf.align) or 'left'
+      else
+        suffix_width[i] = 1
+      end
+    end
+  else
+    for i, col_def in ipairs(column_defs) do
+      col_width[i + 1] = 1
+      local _, conf = util.split_config(col_def)
+      col_align[i + 1] = conf and conf.align or 'left'
+    end
+  end
+
+  local function collect_entry(entry, is_hidden)
+    local cols = M.format_entry_cols(entry, column_defs, col_width, adapter, is_hidden, bufnr)
+    table.insert(line_table, cols)
+    table.insert(rendered_entries, entry)
+    if not column_layout then
+      return
+    end
+
+    local prefix_count = #col_width - 1
+    local current_name_width = 0
+    for i = prefix_count + 2, #cols do
+      local chunk = cols[i]
+      local text = type(chunk) == 'table' and chunk[1] or chunk
+      ---@cast text string
+      if current_name_width > 0 then
+        current_name_width = current_name_width + 1
+      end
+      current_name_width = current_name_width + vim.api.nvim_strwidth(text)
+    end
+    name_width = math.max(name_width, current_name_width)
+
+    local after_name = false
+    for i, item in ipairs(column_layout) do
+      if item.name == 'name' then
+        after_name = true
+      elseif after_name and item.virtual then
+        local chunk = columns.render_col(adapter, item.def, entry, bufnr)
+        local text = type(chunk) == 'table' and chunk[1] or chunk
+        ---@cast text string
+        suffix_width[i] = math.max(suffix_width[i] or 1, vim.api.nvim_strwidth(text))
+      end
+    end
   end
 
   local parent_entry = { 0, '..', 'directory' }
   if M.should_display(bufnr, parent_entry) then
-    local cols = M.format_entry_cols(parent_entry, column_defs, col_width, adapter, true, bufnr)
-    table.insert(line_table, cols)
+    collect_entry(parent_entry, true)
   end
 
   for _, entry in ipairs(entry_list) do
     local should_display, is_hidden = M.should_display(bufnr, entry)
     if should_display then
-      local cols = M.format_entry_cols(entry, column_defs, col_width, adapter, is_hidden, bufnr)
-      table.insert(line_table, cols)
+      collect_entry(entry, is_hidden)
 
       local name = entry[FIELD_NAME]
       if seek_after_render == name then
@@ -968,8 +1260,7 @@ local function render_buffer(bufnr, opts)
       local name = entry[FIELD_NAME]
       local public_entry = util.export_entry(entry)
       if not config.view_options.is_always_hidden(name, bufnr, public_entry) then
-        local cols = M.format_entry_cols(entry, column_defs, col_width, adapter, true, bufnr)
-        table.insert(line_table, cols)
+        collect_entry(entry, true)
         if seek_after_render == name then
           seek_after_render_found = true
           jump_idx = #line_table
@@ -986,9 +1277,44 @@ local function render_buffer(bufnr, opts)
   vim.bo[bufnr].modifiable = false
   vim.bo[bufnr].modified = false
   util.set_highlights(bufnr, highlights)
-  _rendering[bufnr] = nil
   session[bufnr].col_width = col_width
   session[bufnr].col_align = col_align
+  session[bufnr].column_layout = column_layout
+  session[bufnr].name_width = name_width
+  session[bufnr].suffix_width = suffix_width
+  vim.api.nvim_buf_clear_namespace(bufnr, decor_ns, 0, -1)
+  vim.api.nvim_buf_set_extmark(bufnr, decor_ns, 0, 0, {
+    virt_text = { { '' } },
+    virt_text_pos = 'inline',
+  })
+  vim.api.nvim_buf_clear_namespace(bufnr, column_ns, 0, -1)
+  vim.api.nvim_buf_clear_namespace(bufnr, header_ns, 0, -1)
+  if column_layout then
+    for lnum, line in ipairs(lines) do
+      local entry = rendered_entries[lnum]
+      if entry then
+        render_prefix_virtual_columns(
+          entry,
+          adapter,
+          bufnr,
+          session[bufnr],
+          line,
+          lnum - 1,
+          column_ns,
+          false
+        )
+      end
+    end
+  end
+  if config.show_header then
+    local header_chunks = column_layout and build_header_chunks(session[bufnr])
+      or build_physical_header_chunks(column_defs, col_width, col_align)
+    vim.api.nvim_buf_set_extmark(bufnr, header_ns, 0, 0, {
+      virt_lines = { header_chunks },
+      virt_lines_above = true,
+    })
+  end
+  _rendering[bufnr] = nil
 
   if opts.jump then
     -- TODO why is the schedule necessary?
@@ -1049,7 +1375,7 @@ end
 ---@param is_hidden boolean
 ---@param bufnr integer
 ---@return oil.TextChunk[]
-M.format_entry_cols = function(entry, column_defs, col_width, adapter, is_hidden, bufnr)
+local function format_physical_entry_cols(entry, column_defs, col_width, adapter, is_hidden, bufnr)
   local name = entry[FIELD_NAME]
   local meta = entry[FIELD_META]
   local hl_suffix = ''
@@ -1153,6 +1479,64 @@ M.format_entry_cols = function(entry, column_defs, col_width, adapter, is_hidden
   end
 
   return cols
+end
+
+---@private
+---@param entry oil.InternalEntry
+---@param column_defs oil.ColumnSpec[]
+---@param col_width integer[]
+---@param adapter oil.Adapter
+---@param is_hidden boolean
+---@param bufnr integer
+---@return oil.TextChunk[]
+M.format_entry_cols = function(entry, column_defs, col_width, adapter, is_hidden, bufnr)
+  if not config.virtual_text_columns then
+    return format_physical_entry_cols(entry, column_defs, col_width, adapter, is_hidden, bufnr)
+  end
+
+  local physical_width = {}
+  for i in ipairs(column_defs) do
+    physical_width[i + 1] = 1
+  end
+  local physical =
+    format_physical_entry_cols(entry, column_defs, physical_width, adapter, is_hidden, bufnr)
+  local ret = { physical[1] }
+  col_width[1] = math.max(col_width[1] or 1, vim.api.nvim_strwidth(physical[1]))
+
+  local editable_index = 1
+  local found_name = false
+  for _, item in ipairs(columns.get_column_layout(adapter)) do
+    if item.name == 'name' then
+      found_name = true
+      break
+    elseif item.virtual then
+      local chunk = columns.render_col(adapter, item.def, entry, bufnr)
+      local text = type(chunk) == 'table' and chunk[1] or chunk
+      ---@cast text string
+      col_width[#ret + 1] = math.max(col_width[#ret + 1] or 1, vim.api.nvim_strwidth(text))
+      table.insert(ret, '')
+    else
+      local chunk = physical[editable_index + 1]
+      local text = type(chunk) == 'table' and chunk[1] or chunk
+      ---@cast text string
+      col_width[#ret + 1] = math.max(col_width[#ret + 1] or 1, vim.api.nvim_strwidth(text))
+      table.insert(ret, chunk)
+      editable_index = editable_index + 1
+    end
+  end
+  assert(found_name, 'Column layout is missing the name column')
+
+  for i = #column_defs + 2, #physical do
+    table.insert(ret, physical[i])
+  end
+  return ret
+end
+
+---@param bufnr integer
+---@return integer[]|nil
+M.get_column_widths = function(bufnr)
+  local sess = session[bufnr]
+  return sess and sess.col_width and vim.deepcopy(sess.col_width) or nil
 end
 
 ---Get the column names that are used for view and sort
@@ -1312,6 +1696,69 @@ M.render_buffer_async = function(bufnr, opts, caller_callback)
       finish()
     end
   end)
+end
+
+M.setup_decoration_provider = function()
+  vim.api.nvim_set_decoration_provider(decor_ns, {
+    on_start = function()
+      decor_ctx = {}
+      return true
+    end,
+    on_win = function(_, winid, bufnr)
+      local sess = session[bufnr]
+      if not config.virtual_text_columns or not sess or not sess.column_layout then
+        return false
+      end
+      if not decor_ctx[bufnr] then
+        local adapter = util.get_adapter(bufnr, true)
+        if not adapter then
+          return false
+        end
+        decor_ctx[bufnr] = { adapter = adapter }
+      end
+      return true
+    end,
+    on_line = function(_, winid, bufnr, row)
+      local ctx = decor_ctx[bufnr]
+      local sess = session[bufnr]
+      if not ctx or not sess then
+        return
+      end
+      local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
+      if not line then
+        return
+      end
+      local id = tonumber(line:match('^/(%d+)'))
+      if not id then
+        return
+      end
+      local entry = id == 0 and { 0, '..', 'directory' } or cache.get_entry_by_id(id)
+      if not entry then
+        return
+      end
+
+      local has_column_extmark = #vim.api.nvim_buf_get_extmarks(
+        bufnr,
+        column_ns,
+        { row, 0 },
+        { row, -1 },
+        { limit = 1 }
+      ) > 0
+      if not has_column_extmark then
+        render_prefix_virtual_columns(entry, ctx.adapter, bufnr, sess, line, row, decor_ns, true)
+      end
+
+      local suffix = render_suffix_virtual_columns(entry, ctx.adapter, bufnr, sess)
+      if #suffix > 0 then
+        vim.api.nvim_buf_set_extmark(bufnr, decor_ns, row, 0, {
+          virt_text = suffix,
+          virt_text_pos = 'overlay',
+          virt_text_win_col = get_suffix_win_col(winid, line, sess),
+          ephemeral = true,
+        })
+      end
+    end,
+  })
 end
 
 return M

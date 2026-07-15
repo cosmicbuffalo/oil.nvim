@@ -87,7 +87,7 @@ M.parse_line = function(adapter, line, column_defs)
     local line_adapter = assert(config.get_adapter_by_scheme(parent_url))
     if adapter ~= line_adapter then
       adapter = line_adapter
-      column_defs = columns.get_supported_columns(adapter)
+      column_defs = columns.get_editable_columns(adapter)
     end
   end
 
@@ -105,7 +105,9 @@ M.parse_line = function(adapter, line, column_defs)
     start = range[2] + 1
   end
   local name = rem
+  local leading = ''
   if name then
+    leading = name:match('^%s*') or ''
     local isdir
     name, isdir = parsedir(vim.trim(name))
     if name ~= '' then
@@ -114,7 +116,8 @@ M.parse_line = function(adapter, line, column_defs)
     ret._type = isdir and 'directory' or 'file'
   end
   local entry = cache.get_entry_by_id(ret.id)
-  ranges.name = { start, start + string.len(rem) - 1 }
+  local trimmed_rem = vim.trim(rem)
+  ranges.name = { start + #leading, start + #leading + string.len(trimmed_rem) - 1 }
   if not entry then
     return { data = ret, ranges = ranges }
   end
@@ -128,7 +131,7 @@ M.parse_line = function(adapter, line, column_defs)
       ret.name = ''
       return { data = ret, ranges = ranges }
     end
-    ranges.name = { start, start + string.len(name_pieces[1]) - 1 }
+    ranges.name = { ranges.name[1], ranges.name[1] + string.len(name_pieces[1]) - 1 }
     ret.name = parsedir(vim.trim(name_pieces[1]))
     ret.link_target = name_pieces[2]
     ret._type = 'link'
@@ -168,7 +171,7 @@ M.parse = function(bufnr)
 
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, true)
   local scheme, path = util.parse_url(bufname)
-  local column_defs = columns.get_supported_columns(adapter)
+  local column_defs = columns.get_editable_columns(adapter)
   local parent_url = scheme .. path
   local children = cache.list_url(parent_url)
   -- map from name to entry ID for all entries previously in the buffer

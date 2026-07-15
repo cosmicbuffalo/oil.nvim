@@ -11,6 +11,13 @@ local default_config = {
     -- "size",
     -- "mtime",
   },
+  -- Render display-only columns as virtual text. Add "name" to the columns list
+  -- to place virtual columns after the filename.
+  virtual_text_columns = false,
+  -- Show a virtual header line above the directory listing.
+  show_header = false,
+  -- Optionally transform column names before displaying them in the header.
+  header_format = nil,
   -- Buffer-local options to use for oil buffers
   buf_options = {
     buflisted = false,
@@ -246,6 +253,9 @@ default_config.view_options.highlight_filename = nil
 ---@field default_file_explorer boolean
 ---@field default_to_float boolean
 ---@field columns oil.ColumnSpec[]
+---@field virtual_text_columns boolean
+---@field show_header boolean
+---@field header_format? fun(text: string): string
 ---@field buf_options table<string, any>
 ---@field win_options table<string, any>
 ---@field delete_to_trash boolean
@@ -283,6 +293,9 @@ local M = {}
 ---@field default_file_explorer? boolean Oil will take over directory buffers (e.g. `vim .` or `:e src/`). Set to false if you still want to use netrw.
 ---@field default_to_float? boolean When true, oil always opens in a floating window
 ---@field columns? oil.ColumnSpec[] The columns to display. See :help oil-columns.
+---@field virtual_text_columns? boolean Render display-only columns as virtual text. Add "name" to columns to place virtual columns after the filename.
+---@field show_header? boolean Show a virtual header line above the directory listing.
+---@field header_format? fun(text: string): string Transform column names before displaying them in the header.
 ---@field buf_options? table<string, any> Buffer-local options to use for oil buffers
 ---@field win_options? table<string, any> Window-local options to use for oil buffers
 ---@field delete_to_trash? boolean Send deleted files to the trash instead of permanently deleting them (:help oil-trash).
@@ -441,6 +454,7 @@ local M = {}
 
 M.setup = function(opts)
   opts = opts or {}
+  M.header_format = nil
 
   local new_conf = vim.tbl_deep_extend('keep', opts, default_config)
   if not new_conf.use_default_keymaps then

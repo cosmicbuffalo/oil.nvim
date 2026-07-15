@@ -193,7 +193,7 @@ for _, time_key in ipairs({ 'ctime', 'mtime', 'atime', 'birthtime' }) do
   file_columns[time_key] = {
     require_stat = true,
 
-    render = function(entry, conf)
+    render = function(entry, conf, bufnr)
       local meta = entry[FIELD_META]
       local stat = meta and meta.stat
       if not stat then
@@ -202,6 +202,12 @@ for _, time_key in ipairs({ 'ctime', 'mtime', 'atime', 'birthtime' }) do
       local fmt = conf and conf.format
       local ret
       if fmt then
+        if type(fmt) == 'function' then
+          if not config.virtual_text_columns then
+            error('Function formatters for time columns require virtual_text_columns = true')
+          end
+          return fmt(stat[time_key].sec, util.export_entry(entry), bufnr)
+        end
         ret = vim.fn.strftime(fmt, stat[time_key].sec)
       else
         local year = vim.fn.strftime('%Y', stat[time_key].sec)
