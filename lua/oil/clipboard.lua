@@ -40,13 +40,15 @@ end
 ---@param adapter oil.Adapter
 ---@param bufnr integer
 local function write_pasted(winid, entry, column_defs, adapter, bufnr)
-  local col_width = {}
-  for i in ipairs(column_defs) do
-    col_width[i + 1] = 1
+  local col_width = view.get_column_widths(bufnr) or {}
+  if not next(col_width) then
+    for i in ipairs(column_defs) do
+      col_width[i + 1] = 1
+    end
   end
   local line_table =
     { view.format_entry_cols(entry, column_defs, col_width, adapter, false, bufnr) }
-  local lines, _ = util.render_table(line_table, col_width)
+  local lines, _ = util.render_table(line_table, col_width, nil, config.column_gap, 1)
   local pos = vim.api.nvim_win_get_cursor(winid)
   vim.api.nvim_buf_set_lines(bufnr, pos[1], pos[1], true, lines)
 end
@@ -57,7 +59,7 @@ local function remove_entry_from_parent_buffer(parent_url, entry)
   local bufnr = vim.fn.bufadd(parent_url)
   assert(vim.api.nvim_buf_is_loaded(bufnr), "Expected parent buffer to be loaded during paste")
   local adapter = assert(util.get_adapter(bufnr))
-  local column_defs = columns.get_supported_columns(adapter)
+  local column_defs = columns.get_editable_columns(adapter)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   for i, line in ipairs(lines) do
     local result = parser.parse_line(adapter, line, column_defs)
@@ -79,7 +81,7 @@ local function paste_paths(paths, delete_original)
   local bufnr = vim.api.nvim_get_current_buf()
   local scheme = "oil://"
   local adapter = assert(config.get_adapter_by_scheme(scheme))
-  local column_defs = columns.get_supported_columns(scheme)
+  local column_defs = columns.get_editable_columns(scheme)
   local winid = vim.api.nvim_get_current_win()
 
   local parent_urls = {}

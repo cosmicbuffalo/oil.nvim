@@ -27,6 +27,15 @@ CONFIG                                                                *oil-confi
         -- "size",
         -- "mtime",
       },
+      -- Number of spaces between visible columns.
+      column_gap = 2,
+      -- Render display-only columns as virtual text. Add "name" to the columns list
+      -- to place virtual columns after the filename.
+      virtual_text_columns = false,
+      -- Show a virtual header line above the directory listing.
+      show_header = false,
+      -- Optionally transform column names before displaying them in the header.
+      header_format = nil,
       -- Buffer-local options to use for oil buffers
       buf_options = {
         buflisted = false,
@@ -414,6 +423,22 @@ COLUMNS                                                              *oil-column
 Columns can be specified as a string to use default arguments (e.g. `"icon"`),
 or as a table to pass parameters (e.g. `{"size", highlight = "Special"}`)
 
+Use `column_gap` to control the number of spaces between visible columns.
+
+With `virtual_text_columns = true`, display-only columns are rendered as virtual
+text while editable columns remain in the buffer. Add `"name"` to the columns
+list to place later display-only columns on the right side of the filename: >lua
+    columns = {
+      "icon",
+      "name",
+      { "size", align = "right" },
+      { "mtime", format = "%Y-%m-%d" },
+    }
+<
+Set `show_header = true` to add a non-editable virtual header line. The optional
+`header_format` callback receives each uppercase column name and returns its
+display label.
+
 type                                                                 *column-type*
     Adapters: *
     Sortable: this column can be used in view_props.sort
@@ -468,7 +493,9 @@ ctime                                                               *column-ctim
       {highlight} `string|fun(value: string): string` Highlight group, or
                   function that returns a highlight group
       {align}     `"left"|"center"|"right"` Text alignment within the column
-      {format}    `string` Format string (see :help strftime)
+      {format}    `string|fun(timestamp: integer, entry: oil.Entry, bufnr: integer): string`
+                  Format string (see :help strftime), or a formatter function
+                  when `virtual_text_columns = true`
 
 mtime                                                               *column-mtime*
     Adapters: files
@@ -479,7 +506,9 @@ mtime                                                               *column-mtim
       {highlight} `string|fun(value: string): string` Highlight group, or
                   function that returns a highlight group
       {align}     `"left"|"center"|"right"` Text alignment within the column
-      {format}    `string` Format string (see :help strftime)
+      {format}    `string|fun(timestamp: integer, entry: oil.Entry, bufnr: integer): string`
+                  Format string (see :help strftime), or a formatter function
+                  when `virtual_text_columns = true`
 
 atime                                                               *column-atime*
     Adapters: files
@@ -490,7 +519,9 @@ atime                                                               *column-atim
       {highlight} `string|fun(value: string): string` Highlight group, or
                   function that returns a highlight group
       {align}     `"left"|"center"|"right"` Text alignment within the column
-      {format}    `string` Format string (see :help strftime)
+      {format}    `string|fun(timestamp: integer, entry: oil.Entry, bufnr: integer): string`
+                  Format string (see :help strftime), or a formatter function
+                  when `virtual_text_columns = true`
 
 birthtime                                                       *column-birthtime*
     Adapters: files, s3
@@ -501,7 +532,10 @@ birthtime                                                       *column-birthtim
       {highlight} `string|fun(value: string): string` Highlight group, or
                   function that returns a highlight group
       {align}     `"left"|"center"|"right"` Text alignment within the column
-      {format}    `string` Format string (see :help strftime)
+      {format}    `string|fun(timestamp: integer, entry: oil.Entry, bufnr: integer): string`
+                  Format string (see :help strftime), or a formatter function
+                  for the files adapter when `virtual_text_columns = true`.
+                  The s3 adapter displays its provider-supplied timestamp.
 
 --------------------------------------------------------------------------------
 ACTIONS                                                              *oil-actions*
@@ -746,6 +780,12 @@ OilTrash                                                             *hl-OilTras
 
 OilTrashSourcePath                                         *hl-OilTrashSourcePath*
     Virtual text that shows the original path of file in the trash
+
+OilVirtualText                                               *hl-OilVirtualText*
+    Virtual text columns in an oil buffer
+
+OilHeader                                                         *hl-OilHeader*
+    Column headers in an oil buffer
 
 --------------------------------------------------------------------------------
 TRASH                                                                  *oil-trash*

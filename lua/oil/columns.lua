@@ -53,6 +53,88 @@ M.get_supported_columns = function(adapter_or_scheme)
   return ret
 end
 
+---@param adapter oil.Adapter
+---@param defn oil.ColumnSpec
+---@return boolean
+M.is_editable_column = function(adapter, defn)
+  local name = util.split_config(defn)
+  if name == "name" then
+    return true
+  end
+  local column = M.get_column(adapter, defn)
+  return column ~= nil and column.perform_action ~= nil
+end
+
+---Return the configured columns that must remain in the editable buffer text.
+---@param adapter_or_scheme string|oil.Adapter
+---@return oil.ColumnSpec[]
+M.get_editable_columns = function(adapter_or_scheme)
+  if not config.virtual_text_columns then
+    return M.get_supported_columns(adapter_or_scheme)
+  end
+  local adapter
+  if type(adapter_or_scheme) == "string" then
+    adapter = config.get_adapter_by_scheme(adapter_or_scheme)
+  else
+    adapter = adapter_or_scheme
+  end
+  assert(adapter)
+  local ret = {}
+  for _, def in ipairs(config.columns) do
+    local name = util.split_config(def)
+    if name ~= "name" and M.get_column(adapter, def) and M.is_editable_column(adapter, def) then
+      table.insert(ret, def)
+    end
+  end
+  return ret
+end
+
+---@class (exact) oil.ColumnLayout
+---@field def oil.ColumnSpec
+---@field name string
+---@field virtual boolean
+
+---Return supported columns in display order, including the filename sentinel.
+---@param adapter_or_scheme string|oil.Adapter
+---@return oil.ColumnLayout[]
+M.get_column_layout = function(adapter_or_scheme)
+  local adapter
+  if type(adapter_or_scheme) == "string" then
+    adapter = config.get_adapter_by_scheme(adapter_or_scheme)
+  else
+    adapter = adapter_or_scheme
+  end
+  assert(adapter)
+
+  local ret = {}
+  local found_name = false
+  for _, def in ipairs(config.columns) do
+    local name = util.split_config(def)
+    if name == "name" then
+      if found_name then
+        error('The "name" column can only be configured once')
+      end
+      found_name = true
+      table.insert(ret, { def = def, name = name, virtual = false })
+    else
+      local column = M.get_column(adapter, def)
+      if column then
+        local is_virtual = column.perform_action == nil
+        if found_name and not is_virtual then
+          error(
+            string.format('Editable column "%s" cannot be configured after the "name" column', name)
+          )
+        end
+        table.insert(ret, { def = def, name = name, virtual = is_virtual })
+      end
+    end
+  end
+  if not found_name then
+    table.insert(ret, { def = "name", name = "name", virtual = false })
+  end
+  return ret
+end
+
 local EMPTY = { "-", "OilEmpty" }
 
 M.EMPTY = EMPTY

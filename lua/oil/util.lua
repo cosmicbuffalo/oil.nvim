@@ -313,10 +313,14 @@ end
 ---@param lines oil.TextChunk[][]
 ---@param col_width integer[]
 ---@param col_align? oil.ColumnAlign[]
+---@param col_gap? integer
+---@param first_col_gap? integer
 ---@return string[]
 ---@return any[][] List of highlights {group, lnum, col_start, col_end}
-M.render_table = function(lines, col_width, col_align)
+M.render_table = function(lines, col_width, col_align, col_gap, first_col_gap)
   col_align = col_align or {}
+  col_gap = col_gap or 1
+  first_col_gap = first_col_gap or col_gap
   local str_lines = {}
   local highlights = {}
   for _, cols in ipairs(lines) do
@@ -353,9 +357,15 @@ M.render_table = function(lines, col_width, col_align)
           table.insert(highlights, { hl, #str_lines, col + padding, col + padding + unpadded_len })
         end
       end
-      col = col + text:len() + 1
+      local gap = i == 1 and first_col_gap or col_gap
+      col = col + text:len() + gap
     end
-    table.insert(str_lines, table.concat(pieces, " "))
+    local line = table.remove(pieces, 1) or ""
+    for i, piece in ipairs(pieces) do
+      local gap = i == 1 and first_col_gap or col_gap
+      line = line .. string.rep(" ", gap) .. piece
+    end
+    table.insert(str_lines, line)
   end
   return str_lines, highlights
 end

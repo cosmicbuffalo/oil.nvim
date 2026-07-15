@@ -50,7 +50,7 @@ M.get_entry_on_line = function(bufnr, lnum)
   if not line then
     return nil
   end
-  local column_defs = columns.get_supported_columns(adapter)
+  local column_defs = columns.get_editable_columns(adapter)
   local result = parser.parse_line(adapter, line, column_defs)
   if result then
     if result.entry then
@@ -953,6 +953,16 @@ M._get_highlights = function()
       link = "Comment",
       desc = "Virtual text that shows the original path of file in the trash",
     },
+    {
+      name = "OilVirtualText",
+      link = "Comment",
+      desc = "Virtual text columns in an oil buffer",
+    },
+    {
+      name = "OilHeader",
+      link = "Title",
+      desc = "Column headers in an oil buffer",
+    },
   }
 end
 
@@ -1121,6 +1131,7 @@ M.setup = function(opts)
 
   config.setup(opts)
   set_colors()
+  require("oil.view").setup_decoration_provider()
   local callback = function(args)
     local util = require("oil.util")
     if args.smods.tab > 0 then
