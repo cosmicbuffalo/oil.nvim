@@ -542,6 +542,9 @@ local function calc_constrained_cursor_pos(bufnr, adapter, mode, cur)
   if cur[1] < 1 or cur[1] > line_count then
     return
   end
+  if config.show_header and cur[1] == 1 and line_count > 1 then
+    cur = { 2, 0 }
+  end
   local line = vim.api.nvim_buf_get_lines(bufnr, cur[1] - 1, cur[1], true)[1]
   local column_defs = columns.get_editable_columns(adapter)
   local result = parser.parse_line(adapter, line, column_defs)
@@ -1168,7 +1171,7 @@ local function render_buffer(bufnr, opts)
 
   local jump_idx
   if opts.jump_first then
-    jump_idx = 1
+    jump_idx = config.show_header and 2 or 1
   end
   local seek_after_render_found = false
   local seek_after_render = M.get_last_cursor(bufname)
@@ -1176,6 +1179,12 @@ local function render_buffer(bufnr, opts)
   local column_layout = config.virtual_text_columns and columns.get_column_layout(adapter) or nil
   local line_table = {}
   local rendered_entries = {}
+  local entry_count = 0
+  if config.show_header then
+    -- Virtual lines above the first buffer row are clipped by Neovim. Reserve an
+    -- empty, parser-safe row and overlay the virtual header text on it instead.
+    table.insert(line_table, {})
+  end
   local col_width = {}
   local col_align = {}
   local suffix_width = {}
@@ -1206,7 +1215,8 @@ local function render_buffer(bufnr, opts)
   local function collect_entry(entry, is_hidden)
     local cols = M.format_entry_cols(entry, column_defs, col_width, adapter, is_hidden, bufnr)
     table.insert(line_table, cols)
-    table.insert(rendered_entries, entry)
+    rendered_entries[#line_table] = entry
+    entry_count = entry_count + 1
     if not column_layout then
       return
     end
@@ -1255,7 +1265,7 @@ local function render_buffer(bufnr, opts)
     end
   end
 
-  if config.view_options.show_hidden_when_empty and #line_table <= 1 then
+  if config.view_options.show_hidden_when_empty and entry_count <= 1 then
     for _, entry in ipairs(entry_list) do
       local name = entry[FIELD_NAME]
       local public_entry = util.export_entry(entry)
@@ -1310,8 +1320,8 @@ local function render_buffer(bufnr, opts)
     local header_chunks = column_layout and build_header_chunks(session[bufnr])
       or build_physical_header_chunks(column_defs, col_width, col_align)
     vim.api.nvim_buf_set_extmark(bufnr, header_ns, 0, 0, {
-      virt_lines = { header_chunks },
-      virt_lines_above = true,
+      virt_text = header_chunks,
+      virt_text_pos = 'overlay',
     })
   end
   _rendering[bufnr] = nil
