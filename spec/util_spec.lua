@@ -37,4 +37,17 @@ describe('util', function()
     assert.is_true(vim.api.nvim_buf_is_valid(bufnr))
     assert.equals('oil-test:///foo/', vim.api.nvim_buf_get_name(bufnr))
   end)
+
+  it('renders a custom column gap without widening the internal ID separator', function()
+    local lines, highlights = util.render_table(
+      { { '/001', { 'x', 'TestHighlight' }, 'name' } },
+      { 4, 1, 4 },
+      nil,
+      3,
+      1
+    )
+
+    assert.same({ '/001 x   name' }, lines)
+    assert.same({ { 'TestHighlight', 0, 5, 6 } }, highlights)
+  end)
 end)

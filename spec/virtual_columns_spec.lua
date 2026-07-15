@@ -22,6 +22,7 @@ describe('virtual columns', function()
       },
       virtual_text_columns = true,
       show_header = true,
+      column_gap = 3,
       header_format = function(text)
         return text == 'TYPE' and 'KIND' or text
       end,
@@ -47,6 +48,7 @@ describe('virtual columns', function()
     assert.are.equal(2, #extmarks)
     assert.are.equal(1, #headers)
     assert.matches('KIND', headers[1][4].virt_text[1][1])
+    assert.matches('   $', headers[1][4].virt_text[2][1])
 
     vim.bo[bufnr].modifiable = true
     lines[3] = lines[3]:gsub('a%.txt$', 'b.txt')
@@ -141,5 +143,11 @@ describe('virtual columns', function()
     assert.has_error(function()
       columns.get_column_layout(adapter)
     end, 'Editable column "permissions" cannot be configured after the "name" column')
+  end)
+
+  it('rejects invalid column gaps', function()
+    assert.has_error(function()
+      config.setup({ column_gap = 1.5 })
+    end, 'column_gap must be a non-negative integer')
   end)
 end)

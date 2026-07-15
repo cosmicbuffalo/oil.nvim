@@ -100,6 +100,8 @@ The full list of options with their defaults:
         -- "size",
         -- "mtime",
       },
+      -- Number of spaces between visible columns.
+      column_gap = 2,
       -- Render display-only columns as virtual text. Add "name" to the columns list
       -- to place virtual columns after the filename.
       virtual_text_columns = false,
@@ -642,6 +644,8 @@ COLUMNS                                                          *oil-columns*
 
 Columns can be specified as a string to use default arguments (e.g. `"icon"`),
 or as a table to pass parameters (e.g. `{"size", highlight = "Special"}`)
+
+Use `column_gap` to control the number of spaces between visible columns.
 
 With `virtual_text_columns = true`, display-only columns are rendered as virtual
 text while editable columns remain in the buffer. Add `"name"` to the columns

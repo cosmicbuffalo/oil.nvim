@@ -11,6 +11,8 @@ local default_config = {
     -- "size",
     -- "mtime",
   },
+  -- Number of spaces between visible columns
+  column_gap = 2,
   -- Render display-only columns as virtual text. Add "name" to the columns list
   -- to place virtual columns after the filename.
   virtual_text_columns = false,
@@ -253,6 +255,7 @@ default_config.view_options.highlight_filename = nil
 ---@field default_file_explorer boolean
 ---@field default_to_float boolean
 ---@field columns oil.ColumnSpec[]
+---@field column_gap integer
 ---@field virtual_text_columns boolean
 ---@field show_header boolean
 ---@field header_format? fun(text: string): string
@@ -293,6 +296,7 @@ local M = {}
 ---@field default_file_explorer? boolean Oil will take over directory buffers (e.g. `vim .` or `:e src/`). Set to false if you still want to use netrw.
 ---@field default_to_float? boolean When true, oil always opens in a floating window
 ---@field columns? oil.ColumnSpec[] The columns to display. See :help oil-columns.
+---@field column_gap? integer Number of spaces between visible columns.
 ---@field virtual_text_columns? boolean Render display-only columns as virtual text. Add "name" to columns to place virtual columns after the filename.
 ---@field show_header? boolean Show a virtual header line above the directory listing.
 ---@field header_format? fun(text: string): string Transform column names before displaying them in the header.
@@ -457,6 +461,13 @@ M.setup = function(opts)
   M.header_format = nil
 
   local new_conf = vim.tbl_deep_extend('keep', opts, default_config)
+  if
+    type(new_conf.column_gap) ~= 'number'
+    or new_conf.column_gap < 0
+    or new_conf.column_gap ~= math.floor(new_conf.column_gap)
+  then
+    error('column_gap must be a non-negative integer')
+  end
   if not new_conf.use_default_keymaps then
     new_conf.keymaps = opts.keymaps or {}
   elseif opts.keymaps then

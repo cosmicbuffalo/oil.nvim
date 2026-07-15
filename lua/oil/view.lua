@@ -230,13 +230,13 @@ local function render_prefix_virtual_columns(entry, adapter, bufnr, sess, line, 
     end
 
     if item.virtual then
-      byte_col = byte_col + width + 1
+      byte_col = byte_col + width + config.column_gap
     else
       local chunk = columns.render_col(adapter, item.def, entry, bufnr)
       local text = type(chunk) == 'table' and chunk[1] or chunk
       ---@cast text string
       local padded = util.pad_align(text, width, align)
-      byte_col = byte_col + #padded + 1
+      byte_col = byte_col + #padded + config.column_gap
     end
   end
 end
@@ -260,7 +260,7 @@ local function render_suffix_virtual_columns(entry, adapter, bufnr, sess)
       for _, virt_chunk in ipairs(pad_virtual_chunk(chunk, width, align, 'OilVirtualText')) do
         table.insert(ret, virt_chunk)
       end
-      table.insert(ret, { ' ', 'OilVirtualText' })
+      table.insert(ret, { string.rep(' ', config.column_gap), 'OilVirtualText' })
     end
   end
   return ret
@@ -280,9 +280,9 @@ local function get_suffix_win_col(winid, line, sess)
     col = id_prefix and vim.api.nvim_strwidth(id_prefix) or 0
   end
   for i = 2, #(sess.col_width or {}) do
-    col = col + (sess.col_width[i] or 0) + 1
+    col = col + (sess.col_width[i] or 0) + config.column_gap
   end
-  return col + (sess.name_width or 1) + 1
+  return col + (sess.name_width or 1) + config.column_gap
 end
 
 ---@param text string
@@ -333,7 +333,7 @@ local function build_header_chunks(sess)
     end
     text = truncate_header(text, width)
     text = util.pad_align(text, width, align)
-    table.insert(ret, { text .. ' ', 'OilHeader' })
+    table.insert(ret, { text .. string.rep(' ', config.column_gap), 'OilHeader' })
   end
   return ret
 end
@@ -356,7 +356,7 @@ local function build_physical_header_chunks(column_defs, col_width, col_align)
     local width = col_width[i + 1] or 1
     text = truncate_header(text, width)
     text = util.pad_align(text, width, col_align[i + 1] or 'left')
-    table.insert(ret, { text .. ' ', 'OilHeader' })
+    table.insert(ret, { text .. string.rep(' ', config.column_gap), 'OilHeader' })
   end
   local name = config.header_format and config.header_format('NAME') or 'NAME'
   if type(name) ~= 'string' then
@@ -516,7 +516,7 @@ local function get_first_mutable_column_col(bufnr, line, adapter, ranges)
       if not item.virtual then
         return byte_col
       end
-      byte_col = byte_col + (sess.col_width[prefix_index + 1] or 0) + 1
+      byte_col = byte_col + (sess.col_width[prefix_index + 1] or 0) + config.column_gap
     end
   end
   local min_col = ranges.name[1]
@@ -831,7 +831,7 @@ M.reapply_highlights = function(bufnr)
       table.insert(line_table, {})
     end
   end
-  local _, highlights = util.render_table(line_table, col_width, col_align)
+  local _, highlights = util.render_table(line_table, col_width, col_align, config.column_gap, 1)
   util.set_highlights(bufnr, highlights)
 end
 
@@ -1228,7 +1228,7 @@ local function render_buffer(bufnr, opts)
       local text = type(chunk) == 'table' and chunk[1] or chunk
       ---@cast text string
       if current_name_width > 0 then
-        current_name_width = current_name_width + 1
+        current_name_width = current_name_width + config.column_gap
       end
       current_name_width = current_name_width + vim.api.nvim_strwidth(text)
     end
@@ -1279,7 +1279,8 @@ local function render_buffer(bufnr, opts)
     end
   end
 
-  local lines, highlights = util.render_table(line_table, col_width, col_align)
+  local lines, highlights =
+    util.render_table(line_table, col_width, col_align, config.column_gap, 1)
 
   _rendering[bufnr] = true
   vim.bo[bufnr].modifiable = true

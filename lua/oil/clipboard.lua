@@ -48,7 +48,7 @@ local function write_pasted(winid, entry, column_defs, adapter, bufnr)
   end
   local line_table =
     { view.format_entry_cols(entry, column_defs, col_width, adapter, false, bufnr) }
-  local lines, _ = util.render_table(line_table, col_width)
+  local lines, _ = util.render_table(line_table, col_width, nil, config.column_gap, 1)
   local pos = vim.api.nvim_win_get_cursor(winid)
   vim.api.nvim_buf_set_lines(bufnr, pos[1], pos[1], true, lines)
 end

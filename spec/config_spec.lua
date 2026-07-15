@@ -10,6 +10,7 @@ describe('config', function()
     config.setup()
     assert.is_false(config.delete_to_trash)
     assert.equals(2000, config.cleanup_delay_ms)
+    assert.equals(2, config.column_gap)
   end)
 
   it('applies explicit opts', function()
