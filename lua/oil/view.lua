@@ -121,7 +121,7 @@ end
 ---@class oil.ViewData
 ---@field fs_event? any uv_fs_event_t
 ---@field col_width? integer[]
----@field col_align? oil.ColumnAlign[]
+---@field col_align? oil.ColumnAlignment[]
 ---@field column_layout? oil.ColumnLayout[]
 ---@field name_width? integer
 ---@field suffix_width? table<integer, integer>
@@ -139,7 +139,7 @@ local decor_ctx = {}
 
 ---@param chunk oil.TextChunk
 ---@param width integer
----@param align oil.ColumnAlign
+---@param align oil.ColumnAlignment
 ---@param fallback_hl? string
 ---@return [string, string?][]
 local function pad_virtual_chunk(chunk, width, align, fallback_hl)
@@ -320,7 +320,7 @@ end
 
 ---@param column_defs oil.ColumnSpec[]
 ---@param col_width integer[]
----@param col_align oil.ColumnAlign[]
+---@param col_align oil.ColumnAlignment[]
 ---@return [string, string][]
 local function build_physical_header_chunks(column_defs, col_width, col_align)
   local ret = {}

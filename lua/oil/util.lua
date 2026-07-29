@@ -92,7 +92,7 @@ end
 
 ---@param text string
 ---@param width integer|nil
----@param align oil.ColumnAlign
+---@param align oil.ColumnAlignment
 ---@return string padded_text
 ---@return integer left_padding
 M.pad_align = function(text, width, align)
@@ -308,11 +308,11 @@ M.split_config = function(name_or_config)
   end
 end
 
----@alias oil.ColumnAlign "left"|"center"|"right"
+---@alias oil.ColumnAlignment "left"|"center"|"right"
 
 ---@param lines oil.TextChunk[][]
 ---@param col_width integer[]
----@param col_align? oil.ColumnAlign[]
+---@param col_align? oil.ColumnAlignment[]
 ---@param col_gap? integer
 ---@param first_col_gap? integer
 ---@return string[]
